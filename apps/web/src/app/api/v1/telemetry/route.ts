@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
-import { apiError } from "@/lib/http";
+import { fail } from "@/lib/http";
 import { getRepo } from "@/lib/repo";
 
 export const dynamic = "force-dynamic";
@@ -38,13 +38,13 @@ const bodySchema = z.object({
 
 export async function POST(request: NextRequest) {
   const apiKey = request.headers.get("x-api-key")?.trim();
-  if (!apiKey) return apiError("Chýba hlavička x-api-key.", 401);
+  if (!apiKey) return fail("api.missingKey", 401);
   const repo = await getRepo();
   const server = await repo.findByApiKey(apiKey);
-  if (!server) return apiError("Neplatný API kľúč.", 401);
+  if (!server) return fail("api.badKey", 401);
   const json = await request.json().catch(() => null);
   const parsed = bodySchema.safeParse(json);
-  if (!parsed.success) return apiError("Telemetria má neplatný tvar.", 400);
+  if (!parsed.success) return fail("api.badTelemetry", 400);
   const body = parsed.data;
   const timestamp =
     typeof body.timestamp === "number" ? new Date(body.timestamp).toISOString() : body.timestamp;

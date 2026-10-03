@@ -1,5 +1,17 @@
+import { hashPassword } from "./passwords";
 import type { AuditRecord, AuditType, CommandRecord, PlayerRecord, ServerRecord, StoreData, TelemetryPoint } from "./types";
-import { DEMO_API_KEY, DEMO_OWNER_ID, DEMO_SERVER_ID } from "./types";
+import {
+  DEMO_API_KEY,
+  DEMO_OWNER_EMAIL,
+  DEMO_OWNER_ID,
+  DEMO_OWNER_PASSWORD,
+  DEMO_SERVER_ID,
+  SECOND_API_KEY,
+  SECOND_OWNER_EMAIL,
+  SECOND_OWNER_ID,
+  SECOND_OWNER_PASSWORD,
+  SECOND_SERVER_ID,
+} from "./types";
 
 const SERVER = DEMO_SERVER_ID;
 
@@ -15,7 +27,7 @@ export function buildSeed(now = Date.now()): StoreData {
   const restartedAt = now - 36 * 60 * 60 * 1000;
   const telemetry: TelemetryPoint[] = [];
   const step = 5 * 60 * 1000;
-  const start = now - 7 * 24 * 60 * 60 * 1000;
+  const start = now - 8 * 24 * 60 * 60 * 1000;
   let ram = 2900;
   for (let t = start; t <= now; t += step) {
     const index = telemetry.length;
@@ -79,6 +91,7 @@ export function buildSeed(now = Date.now()): StoreData {
     [8, "chat", "Pixel", "pred hodinou TPS spadlo pod 15, už je to späť na 20", 0.5, 80, 0.5, "minecraft:overworld"],
     [5, "command", "Pixel", "/tp Dusanek", 0.5, 80, 0.5, "minecraft:overworld"],
     [2, "chat", "Majka", "idem spať, nenechávajte pec bez dozoru", 12.4, 64, 88.1, "minecraft:overworld"],
+    [8 * 24 * 60 + 40, "chat", "Pixel", "starý záznam mimo retenčné okno plánu Zadarmo", 0.5, 80, 0.5, "minecraft:overworld"],
   ];
 
   const auditLogs: AuditRecord[] = script.map((row, index) => ({
@@ -119,21 +132,102 @@ export function buildSeed(now = Date.now()): StoreData {
     },
   ];
 
+  const mineTelemetry = seriesFor(SECOND_SERVER_ID, now, 1400);
+  telemetry.push(...mineTelemetry);
+  const minePlayers: PlayerRecord[] = [
+    player("p_ondro", "aaaa1111-2222-4333-8444-555566667701", "Ondro", 33, "minecraft:overworld", 40, 62, 12, 18, 16, true, true, 90, null, now, SECOND_SERVER_ID),
+    player("p_iveta", "bbbb2222-3333-4444-8555-666677778802", "Iveta", 71, "minecraft:overworld", -12, 70, 90, 20, 19, false, true, 40, null, now, SECOND_SERVER_ID),
+    player("p_matus", "cccc3333-4444-4555-8666-777788889903", "Matus", 110, "minecraft:the_nether", 80, 40, -20, 9, 8, false, false, 200, 30, now, SECOND_SERVER_ID),
+  ];
+  players.push(...minePlayers);
+  const mineAudit: AuditRecord[] = [
+    [90, "join", "Ondro", "Ondro sa pripojil"],
+    [70, "chat", "Iveta", "v bani je šachta tri, nechajte koľajnice"],
+    [20, "command", "Ondro", "/sethome ban"],
+    [8 * 24 * 60 + 15, "chat", "Ondro", "starý záznam mimo retenčné okno"],
+  ].map((row, index) => ({
+    id: `aud_b_${index}`,
+    serverId: SECOND_SERVER_ID,
+    type: row[1] as AuditType,
+    player: row[2] as string,
+    message: row[3] as string,
+    x: 40,
+    y: 62,
+    z: 12,
+    dimension: "minecraft:overworld",
+    timestamp: iso(now - (row[0] as number) * 60 * 1000),
+  }));
+  auditLogs.push(...mineAudit);
+
+  const mine: ServerRecord = {
+    id: SECOND_SERVER_ID,
+    name: "Dúbravská Baňa",
+    apiKey: SECOND_API_KEY,
+    ownerId: SECOND_OWNER_ID,
+    motd: "Súkromná baňa · whitelist",
+    version: "1.20.1",
+    maxPlayers: 12,
+    stopped: false,
+    createdAt: iso(now - 20 * 24 * 60 * 60 * 1000),
+  };
+
   return {
     users: [
       {
         id: DEMO_OWNER_ID,
         name: "Demo Majiteľ",
-        email: "majitel@craftops.local",
+        email: DEMO_OWNER_EMAIL,
         discordId: null,
+        passwordHash: hashPassword(DEMO_OWNER_PASSWORD),
+        plan: "free",
+        image: null,
+      },
+      {
+        id: SECOND_OWNER_ID,
+        name: "Peter Dúbrava",
+        email: SECOND_OWNER_EMAIL,
+        discordId: null,
+        passwordHash: hashPassword(SECOND_OWNER_PASSWORD),
+        plan: "free",
+        image: null,
       },
     ],
-    servers: [server],
+    servers: [server, mine],
     telemetry,
     auditLogs,
     players,
     commands,
   };
+}
+
+function seriesFor(serverId: string, now: number, ramBase: number) {
+  const points: TelemetryPoint[] = [];
+  const step = 5 * 60 * 1000;
+  const start = now - 8 * 24 * 60 * 60 * 1000;
+  let ram = ramBase;
+  for (let t = start; t <= now; t += step) {
+    const index = points.length;
+    const hour = new Date(t).getUTCHours();
+    const evening = hour >= 18 && hour <= 22;
+    let mspt = 11 + 3 * Math.abs(Math.sin(index / 9)) + (evening ? 1.5 : 0);
+    const tps = round1(19.4 + (index % 4) * 0.1);
+    ram += evening ? 20 : 8;
+    if (index % 40 === 0) ram = ramBase;
+    ram = Math.min(ram, 4096);
+    points.push({
+      id: `tel_${serverId}_${t}`,
+      serverId,
+      timestamp: iso(t),
+      tps: Math.min(20, tps),
+      mspt: round1(mspt),
+      ramUsedMb: Math.round(ram),
+      ramAllocMb: 4096,
+      ramMaxMb: 4096,
+      playersOnline: evening ? 2 : 1,
+      uptimeSeconds: Math.max(60, Math.floor((t - (now - 10 * 60 * 60 * 1000)) / 1000)),
+    });
+  }
+  return points;
 }
 
 function player(
@@ -152,10 +246,11 @@ function player(
   joinedMin: number,
   leftMin: number | null,
   now: number,
+  serverId = SERVER,
 ): PlayerRecord {
   return {
     id,
-    serverId: SERVER,
+    serverId,
     uuid,
     username,
     ping,

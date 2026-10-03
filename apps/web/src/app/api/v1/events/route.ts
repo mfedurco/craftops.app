@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
-import { apiError } from "@/lib/http";
+import { fail } from "@/lib/http";
 import { getRepo } from "@/lib/repo";
 import type { EventInput } from "@/lib/types";
 
@@ -21,14 +21,14 @@ const eventSchema = z.object({
 
 export async function POST(request: NextRequest) {
   const apiKey = request.headers.get("x-api-key")?.trim();
-  if (!apiKey) return apiError("Chýba hlavička x-api-key.", 401);
+  if (!apiKey) return fail("api.missingKey", 401);
   const repo = await getRepo();
   const server = await repo.findByApiKey(apiKey);
-  if (!server) return apiError("Neplatný API kľúč.", 401);
+  if (!server) return fail("api.badKey", 401);
   const json = await request.json().catch(() => null);
   const events = Array.isArray(json?.events) ? json.events : [json];
   const parsed = z.array(eventSchema).safeParse(events);
-  if (!parsed.success) return apiError("Udalosti majú neplatný tvar.", 400);
+  if (!parsed.success) return fail("api.badEvents", 400);
   const normalized: EventInput[] = parsed.data.map((event) => ({
     ...event,
     timestamp: typeof event.timestamp === "number" ? new Date(event.timestamp).toISOString() : event.timestamp,

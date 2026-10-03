@@ -44,3 +44,5 @@ Do not port gameplay into core. Add `neoforge/` as a third Gradle project that d
 6. Keep reading `config/craftops.json`. Core does not change.
 
 NeoForge is not implemented in this repository.
+
+The mod never opens a database. It only POSTs telemetry and events and polls commands over HTTP, with header `x-api-key` set to the server secret from `config/craftops.json`. The web API checks that token and is the only component that writes to Prisma. There is no `DATABASE_URL` and no user session in the mod.

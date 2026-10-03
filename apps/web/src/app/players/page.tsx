@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { EmptyBlock, ErrorBlock, LoadingBlock } from "@/components/async-state";
+import { useI18n } from "@/components/i18n-provider";
 import { useOps } from "@/components/shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,10 +15,11 @@ import type { PlayerRecord } from "@/lib/types";
 
 export default function PlayersPage() {
   const { serverId, refresh } = useOps();
+  const { t } = useI18n();
   const [status, setStatus] = useState<"loading" | "error" | "ready">("loading");
   const [players, setPlayers] = useState<PlayerRecord[]>([]);
   const [selected, setSelected] = useState<PlayerRecord | null>(null);
-  const [reason, setReason] = useState("Porušenie pravidiel");
+  const [reason, setReason] = useState("");
   const [duration, setDuration] = useState("3600");
   const [item, setItem] = useState("minecraft:bread");
   const [count, setCount] = useState("8");
@@ -25,8 +27,8 @@ export default function PlayersPage() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    document.title = "Hráči · CraftOps";
-  }, []);
+    document.title = `${t("nav.players")} · CraftOps`;
+  }, [t]);
 
   async function load() {
     if (!serverId) return;
@@ -64,36 +66,36 @@ export default function PlayersPage() {
       await load();
       await refresh();
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Príkaz sa nepodarilo zaradiť.");
+      setNotice(error instanceof Error ? error.message : t("error.command"));
     } finally {
       setBusy(false);
     }
   }
 
-  if (!serverId) return <EmptyBlock title="Žiadny server" body="Hráči sa zobrazia, keď vyberiete server." />;
-  if (status === "loading") return <LoadingBlock label="Načítavam hráčov…" />;
-  if (status === "error") return <ErrorBlock message="Zoznam hráčov sa nepodarilo načítať." onRetry={() => void load()} />;
+  if (!serverId) return <EmptyBlock title={t("empty.noServer.title")} body={t("empty.noServer.players")} />;
+  if (status === "loading") return <LoadingBlock label={t("loading.players")} />;
+  if (status === "error") return <ErrorBlock message={t("error.players")} onRetry={() => void load()} />;
 
   const online = players.filter((player) => player.online);
 
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Správca hráčov</h1>
-        <p className="text-sm text-muted-foreground">{online.length} online · {players.length - online.length} nedávno odišlo</p>
+        <h1 className="text-2xl font-semibold tracking-tight">{t("players.title")}</h1>
+        <p className="text-sm text-muted-foreground">{t("players.summary", { online: online.length, offline: players.length - online.length })}</p>
       </div>
       {online.length === 0 ? (
-        <EmptyBlock title="Na serveri nie je žiadny hráč" body="Keď sa niekto pripojí, mod pošle zoznam v telemetrii. V ukážke sú hráči predvyplnení, kým ich nevyhodíte." />
+        <EmptyBlock title={t("empty.players.title")} body={t("empty.players.body")} />
       ) : (
         <div className="overflow-hidden rounded-md border border-border">
           <div className="hidden grid-cols-[1.3fr_0.6fr_0.8fr_0.9fr_0.6fr_1fr] gap-2 border-b border-border px-3 py-2 text-[11px] uppercase tracking-[0.14em] text-muted-foreground md:grid">
-            <span>Hráč</span><span>Ping</span><span>Dimenzia</span><span>Zdravie</span><span>Jedlo</span><span>Pozícia</span>
+            <span>{t("players.colPlayer")}</span><span>{t("players.colPing")}</span><span>{t("players.colDimension")}</span><span>{t("players.colHealth")}</span><span>{t("players.colFood")}</span><span>{t("players.colPos")}</span>
           </div>
           {online.map((player) => (
             <button key={player.id} type="button" onClick={() => { setSelected(player); setNotice(null); }} className="grid w-full gap-1 border-b border-border px-3 py-3 text-left last:border-b-0 hover:bg-accent md:grid-cols-[1.3fr_0.6fr_0.8fr_0.9fr_0.6fr_1fr] md:items-center">
               <span className="font-medium">
                 {player.username} {player.operator ? <Badge className="ml-1">OP</Badge> : null}
-                {player.health < 8 ? <Badge className="ml-1 border-destructive/40 text-destructive">nízke HP</Badge> : null}
+                {player.health < 8 ? <Badge className="ml-1 border-destructive/40 text-destructive">{t("players.lowHp")}</Badge> : null}
               </span>
               <span className="font-mono text-sm">{player.ping} ms</span>
               <span className="text-sm">{dimensionLabel(player.dimension)}</span>
@@ -118,33 +120,33 @@ export default function PlayersPage() {
                 <DialogDescription className="font-mono text-xs">{selected.uuid}</DialogDescription>
               </DialogHeader>
               <dl className="grid grid-cols-2 gap-2 text-sm">
-                <div><dt className="text-muted-foreground">Dimenzia</dt><dd>{dimensionLabel(selected.dimension)}</dd></div>
+                <div><dt className="text-muted-foreground">{t("players.dimension")}</dt><dd>{dimensionLabel(selected.dimension)}</dd></div>
                 <div><dt className="text-muted-foreground">Ping</dt><dd className="font-mono">{selected.ping} ms</dd></div>
-                <div><dt className="text-muted-foreground">Zdravie</dt><dd className="font-mono">{selected.health.toFixed(1)} / 20</dd></div>
-                <div><dt className="text-muted-foreground">Jedlo</dt><dd className="font-mono">{selected.food}/20</dd></div>
-                <div className="col-span-2"><dt className="text-muted-foreground">Súradnice</dt><dd className="font-mono">{formatCoords(selected.x, selected.y, selected.z)}</dd></div>
+                <div><dt className="text-muted-foreground">{t("players.health")}</dt><dd className="font-mono">{selected.health.toFixed(1)} / 20</dd></div>
+                <div><dt className="text-muted-foreground">{t("players.food")}</dt><dd className="font-mono">{selected.food}/20</dd></div>
+                <div className="col-span-2"><dt className="text-muted-foreground">{t("players.coords")}</dt><dd className="font-mono">{formatCoords(selected.x, selected.y, selected.z)}</dd></div>
               </dl>
               <div className="mt-3 grid gap-2 sm:grid-cols-2">
                 <div className="space-y-1 sm:col-span-2">
-                  <Label htmlFor="reason">Dôvod</Label>
+                  <Label htmlFor="reason">{t("players.reason")}</Label>
                   <Input id="reason" value={reason} onChange={(event) => setReason(event.target.value)} />
                 </div>
-                <Button variant="destructive" disabled={busy} onClick={() => act("kick", { player: selected.username, reason })}>Kick</Button>
+                <Button variant="destructive" disabled={busy} onClick={() => act("kick", { player: selected.username, reason })}>{t("players.kick")}</Button>
                 <div className="flex gap-2">
-                  <select className="h-9 rounded-md border border-input bg-background px-2 text-sm" value={duration} onChange={(event) => setDuration(event.target.value)} aria-label="Trvanie banu">
-                    <option value="3600">1 hodina</option>
-                    <option value="86400">24 hodín</option>
-                    <option value="604800">7 dní</option>
+                  <select className="h-9 rounded-md border border-input bg-background px-2 text-sm" value={duration} onChange={(event) => setDuration(event.target.value)} aria-label={t("players.banDuration")}>
+                    <option value="3600">{t("players.banHour")}</option>
+                    <option value="86400">{t("players.banDay")}</option>
+                    <option value="604800">{t("players.banWeek")}</option>
                   </select>
-                  <Button variant="outline" disabled={busy} onClick={() => act("ban", { player: selected.username, reason, durationSeconds: duration })}>Dočasný ban</Button>
+                  <Button variant="outline" disabled={busy} onClick={() => act("ban", { player: selected.username, reason, durationSeconds: duration })}>{t("players.ban")}</Button>
                 </div>
-                <Button variant="outline" disabled={busy} onClick={() => act("teleport", { player: selected.username, spawn: "true" })}>Teleport na spawn</Button>
-                <Button variant="outline" disabled={busy} onClick={() => act("heal", { player: selected.username })}>Vyliečiť</Button>
-                <Button variant="secondary" disabled={busy} onClick={() => act(selected.operator ? "deop" : "op", { player: selected.username })}>{selected.operator ? "Deop" : "Op"}</Button>
+                <Button variant="outline" disabled={busy} onClick={() => act("teleport", { player: selected.username, spawn: "true" })}>{t("players.spawn")}</Button>
+                <Button variant="outline" disabled={busy} onClick={() => act("heal", { player: selected.username })}>{t("players.heal")}</Button>
+                <Button variant="secondary" disabled={busy} onClick={() => act(selected.operator ? "deop" : "op", { player: selected.username })}>{selected.operator ? t("players.deop") : t("players.op")}</Button>
                 <div className="flex gap-2 sm:col-span-2">
-                  <Input value={item} onChange={(event) => setItem(event.target.value)} aria-label="Predmet" />
-                  <Input className="w-20" value={count} onChange={(event) => setCount(event.target.value)} aria-label="Počet" />
-                  <Button disabled={busy} onClick={() => act("give", { player: selected.username, item, count })}>Dať predmet</Button>
+                  <Input value={item} onChange={(event) => setItem(event.target.value)} aria-label={t("players.item")} />
+                  <Input className="w-20" value={count} onChange={(event) => setCount(event.target.value)} aria-label={t("players.count")} />
+                  <Button disabled={busy} onClick={() => act("give", { player: selected.username, item, count })}>{t("players.give")}</Button>
                 </div>
               </div>
               {notice ? <p className="mt-3 text-sm text-muted-foreground">{notice}</p> : null}

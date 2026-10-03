@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { EmptyBlock, ErrorBlock, LoadingBlock } from "@/components/async-state";
 import { MetricChart } from "@/components/metric-charts";
+import { useI18n } from "@/components/i18n-provider";
 import { useOps } from "@/components/shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,24 +13,26 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { auditLabel, formatWhen } from "@/lib/format";
+import { formatWhen } from "@/lib/format";
+import { auditTypeLabel } from "@/lib/i18n";
 import type { DashboardData } from "@/lib/types";
 
 export default function DashboardPage() {
   const { serverId, refresh } = useOps();
+  const { t, locale } = useI18n();
   const [status, setStatus] = useState<"loading" | "error" | "ready">("loading");
   const [data, setData] = useState<DashboardData | null>(null);
   const [range, setRange] = useState<"h24" | "d7">("h24");
   const [stopOpen, setStopOpen] = useState(false);
   const [clearOpen, setClearOpen] = useState(false);
-  const [title, setTitle] = useState("Záloha o 22:00");
-  const [subtitle, setSubtitle] = useState("Svet sa na minútu zastaví");
+  const [title, setTitle] = useState("");
+  const [subtitle, setSubtitle] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    document.title = "Prehľad · CraftOps";
-  }, []);
+    document.title = `${t("nav.overview")} · CraftOps`;
+  }, [t]);
 
   useEffect(() => {
     if (!serverId) return;
@@ -78,7 +81,7 @@ export default function DashboardPage() {
       setNotice(json.message);
       await reload();
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Príkaz sa nepodarilo zaradiť.");
+      setNotice(error instanceof Error ? error.message : t("error.command"));
     } finally {
       setBusy(false);
       setStopOpen(false);
@@ -87,43 +90,41 @@ export default function DashboardPage() {
   }
 
   if (!serverId) {
-    return <EmptyBlock title="Žiadny server" body="Vytvorte server a vložte API kľúč do config/craftops.json." />;
+    return <EmptyBlock title={t("empty.noServer.title")} body={t("empty.noServer.dashboard")} />;
   }
-  if (status === "loading") return <LoadingBlock label="Načítavam telemetriu…" />;
+  if (status === "loading") return <LoadingBlock label={t("loading.telemetry")} />;
   if (status === "error" || !data) {
-    return <ErrorBlock message="Nepodarilo sa načítať prehľad servera." onRetry={() => reload().catch(() => setStatus("error"))} />;
+    return <ErrorBlock message={t("error.dashboard")} onRetry={() => reload().catch(() => setStatus("error"))} />;
   }
 
   const series = range === "h24" ? data.series.h24 : data.series.d7;
-  const uptime = `${(data.kpis.uptimeRatio * 100).toLocaleString("sk-SK", { maximumFractionDigits: 1 })} %`;
+  const uptime = `${(data.kpis.uptimeRatio * 100).toLocaleString(locale === "en" ? "en-GB" : "sk-SK", { maximumFractionDigits: 1 })} %`;
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">{data.server.version} · {data.server.motd || "bez MOTD"}</p>
+          <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">{data.server.version} · {data.server.motd || t("common.noMotd")}</p>
           <h1 className="text-2xl font-semibold tracking-tight">{data.server.name}</h1>
         </div>
         <Tabs value={range} onValueChange={(value) => setRange(value as "h24" | "d7")}>
           <TabsList>
-            <TabsTrigger value="h24">24 hodín</TabsTrigger>
-            <TabsTrigger value="d7">7 dní</TabsTrigger>
+            <TabsTrigger value="h24">{t("dashboard.hours")}</TabsTrigger>
+            <TabsTrigger value="d7">{t("dashboard.days")}</TabsTrigger>
           </TabsList>
         </Tabs>
       </div>
       {data.server.stopped ? (
-        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm">
-          Server je v ukážke zastavený. Hráči sú offline, kým mod nepošle novú telemetriu.
-        </div>
+        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm">{t("dashboard.stopped")}</div>
       ) : null}
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <Kpi label="Dostupnosť" value={uptime} hint={data.kpis.uptimeLabel} />
-        <Kpi label="Hráči online" value={`${data.kpis.playersOnline}`} hint={`z ${data.kpis.maxPlayers}`} />
-        <Kpi label="Priemerné MSPT" value={data.kpis.avgMspt.toFixed(1)} hint={`teraz ${data.kpis.mspt.toFixed(1)}`} />
-        <Kpi label="TPS teraz" value={data.kpis.tps.toFixed(1)} hint={`${data.kpis.ramUsedMb.toLocaleString("sk-SK")} MB RAM`} />
+        <Kpi label={t("dashboard.uptime")} value={uptime} hint={data.kpis.uptimeLabel} />
+        <Kpi label={t("dashboard.players")} value={`${data.kpis.playersOnline}`} hint={t("dashboard.ofMax", { max: data.kpis.maxPlayers })} />
+        <Kpi label={t("dashboard.avgMspt")} value={data.kpis.avgMspt.toFixed(1)} hint={t("dashboard.now", { value: data.kpis.mspt.toFixed(1) })} />
+        <Kpi label={t("dashboard.tpsNow")} value={data.kpis.tps.toFixed(1)} hint={t("dashboard.ram", { value: data.kpis.ramUsedMb.toLocaleString(locale === "en" ? "en-GB" : "sk-SK") })} />
       </section>
       {series.length === 0 ? (
-        <EmptyBlock title="Žiadna telemetria" body="Keď mod začne posielať vzorky, grafy TPS, MSPT a RAM sa naplnia." />
+        <EmptyBlock title={t("empty.noTelemetry.title")} body={t("empty.noTelemetry.body")} />
       ) : (
         <section className="grid gap-3 xl:grid-cols-3">
           <ChartCard title="TPS" series={series} dataKey="tps" color="#e0a15a" domain={[0, 20]} />
@@ -134,44 +135,44 @@ export default function DashboardPage() {
       <section className="grid gap-3 lg:grid-cols-[1.1fr_0.9fr]">
         <Card>
           <CardHeader>
-            <CardTitle>Akcie</CardTitle>
+            <CardTitle>{t("dashboard.actions")}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex flex-wrap gap-2">
-              <Button variant="destructive" disabled={busy} onClick={() => setStopOpen(true)}>Núdzové zastavenie</Button>
-              <Button variant="outline" disabled={busy} onClick={() => setClearOpen(true)}>Vyčistiť dropnuté predmety</Button>
+              <Button variant="destructive" disabled={busy} onClick={() => setStopOpen(true)}>{t("dashboard.emergency")}</Button>
+              <Button variant="outline" disabled={busy} onClick={() => setClearOpen(true)}>{t("dashboard.clearDrops")}</Button>
             </div>
             <div className="grid gap-2 sm:grid-cols-2">
               <div className="space-y-1">
-                <Label htmlFor="title">Title</Label>
+                <Label htmlFor="title">{t("dashboard.title")}</Label>
                 <Input id="title" value={title} onChange={(event) => setTitle(event.target.value)} />
               </div>
               <div className="space-y-1">
-                <Label htmlFor="subtitle">Subtitle</Label>
+                <Label htmlFor="subtitle">{t("dashboard.subtitle")}</Label>
                 <Input id="subtitle" value={subtitle} onChange={(event) => setSubtitle(event.target.value)} />
               </div>
             </div>
             <Button disabled={busy || !title.trim()} onClick={() => send("broadcast", { title, subtitle })}>
-              Odoslať správu do sveta
+              {t("dashboard.broadcast")}
             </Button>
             {notice ? <p className="text-sm text-muted-foreground">{notice}</p> : null}
           </CardContent>
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle>Posledné udalosti</CardTitle>
+            <CardTitle>{t("dashboard.recent")}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
             {data.recent.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Audit je zatiaľ prázdny.</p>
+              <p className="text-sm text-muted-foreground">{t("empty.recent")}</p>
             ) : (
               data.recent.map((entry) => (
                 <div key={entry.id} className="flex items-start justify-between gap-3 text-sm">
                   <div>
-                    <Badge>{auditLabel(entry.type)}</Badge>
+                    <Badge>{auditTypeLabel(locale, entry.type)}</Badge>
                     <p className="mt-1">{entry.message}</p>
                   </div>
-                  <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{formatWhen(entry.timestamp)}</span>
+                  <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{formatWhen(entry.timestamp, locale)}</span>
                 </div>
               ))
             )}
@@ -181,26 +182,24 @@ export default function DashboardPage() {
       <Dialog open={stopOpen} onOpenChange={setStopOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Zastaviť server?</DialogTitle>
-            <DialogDescription>
-              Príkaz /stop ide do fronty. Mod ho vykoná na serverovom vlákne a hráči budú odpojení.
-            </DialogDescription>
+            <DialogTitle>{t("dashboard.stopTitle")}</DialogTitle>
+            <DialogDescription>{t("dashboard.stopBody")}</DialogDescription>
           </DialogHeader>
           <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setStopOpen(false)}>Zrušiť</Button>
-            <Button variant="destructive" disabled={busy} onClick={() => send("stop", {})}>Zastaviť</Button>
+            <Button variant="outline" onClick={() => setStopOpen(false)}>{t("common.cancel")}</Button>
+            <Button variant="destructive" disabled={busy} onClick={() => send("stop", {})}>{t("dashboard.stop")}</Button>
           </div>
         </DialogContent>
       </Dialog>
       <Dialog open={clearOpen} onOpenChange={setClearOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Vyčistiť dropy?</DialogTitle>
-            <DialogDescription>Odstráni item entity v načítaných chunkoch všetkých dimenzií.</DialogDescription>
+            <DialogTitle>{t("dashboard.clearTitle")}</DialogTitle>
+            <DialogDescription>{t("dashboard.clearBody")}</DialogDescription>
           </DialogHeader>
           <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setClearOpen(false)}>Zrušiť</Button>
-            <Button disabled={busy} onClick={() => send("clear_drops", {})}>Vyčistiť</Button>
+            <Button variant="outline" onClick={() => setClearOpen(false)}>{t("common.cancel")}</Button>
+            <Button disabled={busy} onClick={() => send("clear_drops", {})}>{t("dashboard.clear")}</Button>
           </div>
         </DialogContent>
       </Dialog>

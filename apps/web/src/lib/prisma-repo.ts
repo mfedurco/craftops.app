@@ -4,7 +4,8 @@ import { Prisma, PrismaClient } from "@prisma/client";
 
 import { isKnownAction } from "./commands";
 import { buildDashboard, craftOpsJson, isAuditType } from "./format";
-import type { AckResult, OpsRepo } from "./repo";
+import { planLimits, retentionCutoff } from "./plans";
+import { RepoError, type AckResult, type OpsRepo } from "./repo";
 import type {
   AuditFilter,
   AuditRecord,
@@ -13,6 +14,7 @@ import type {
   PlayerRecord,
   ServerRecord,
   TelemetryInput,
+  UserRecord,
 } from "./types";
 
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
@@ -149,25 +151,94 @@ function mapCommand(row: {
   };
 }
 
-async function ensureOwner(ownerId: string) {
-  const prisma = db();
-  await prisma.user.upsert({
-    where: { id: ownerId },
-    update: {},
-    create: { id: ownerId, name: "Majiteľ", email: `${ownerId}@craftops.local` },
-  });
+function mapUser(row: {
+  id: string;
+  name: string | null;
+  email: string | null;
+  discordId: string | null;
+  passwordHash: string | null;
+  plan: string;
+  image: string | null;
+}): UserRecord {
+  return {
+    id: row.id,
+    name: row.name ?? "",
+    email: row.email,
+    discordId: row.discordId,
+    passwordHash: row.passwordHash,
+    plan: row.plan === "pro" ? "pro" : "free",
+    image: row.image,
+  };
+}
+
+async function cutoffFor(serverId: string) {
+  const server = await db().server.findUnique({ where: { id: serverId }, include: { owner: true } });
+  if (!server) return null;
+  return { server, cutoff: retentionCutoff(server.owner.plan) };
 }
 
 export const prismaRepo: OpsRepo = {
   mode: "postgres",
-  async listServers(ownerId) {
-    await ensureOwner(ownerId);
+  async findUserById(id) {
+    const row = await db().user.findUnique({ where: { id } });
+    return row ? mapUser(row) : null;
+  },
+  async findUserByEmail(email) {
+    const row = await db().user.findUnique({ where: { email: email.trim().toLowerCase() } });
+    return row ? mapUser(row) : null;
+  },
+  async registerUser({ name, email, passwordHash }) {
     const prisma = db();
+    const needle = email.trim().toLowerCase();
+    const existing = await prisma.user.findUnique({ where: { email: needle } });
+    if (existing) throw new RepoError("email_taken");
+    const row = await prisma.user.create({
+      data: { name: name.trim(), email: needle, passwordHash, plan: "free" },
+    });
+    return mapUser(row);
+  },
+  async upsertDiscordUser({ discordId, email, name, image }) {
+    const prisma = db();
+    const byDiscord = await prisma.user.findUnique({ where: { discordId } });
+    if (byDiscord) {
+      const row = await prisma.user.update({
+        where: { id: byDiscord.id },
+        data: { name: name || byDiscord.name, image, email: byDiscord.email ?? email?.toLowerCase() ?? null },
+      });
+      return mapUser(row);
+    }
+    const needle = email?.trim().toLowerCase();
+    if (needle) {
+      const byEmail = await prisma.user.findUnique({ where: { email: needle } });
+      if (byEmail) {
+        const row = await prisma.user.update({
+          where: { id: byEmail.id },
+          data: { discordId, image: image ?? byEmail.image, name: byEmail.name || name },
+        });
+        return mapUser(row);
+      }
+    }
+    const row = await prisma.user.create({
+      data: { name: name.trim() || "Discord", email: needle || null, discordId, image, plan: "free" },
+    });
+    return mapUser(row);
+  },
+  async usage(ownerId) {
+    const prisma = db();
+    const user = await prisma.user.findUnique({ where: { id: ownerId } });
+    const limits = planLimits(user?.plan);
+    const serverCount = await prisma.server.count({ where: { ownerId } });
+    return { plan: limits.id, serverCount, maxServers: limits.maxServers, retentionDays: limits.retentionDays };
+  },
+  async listServers(ownerId) {
+    const prisma = db();
+    const owner = await prisma.user.findUnique({ where: { id: ownerId } });
+    const cutoff = retentionCutoff(owner?.plan);
     const servers = await prisma.server.findMany({ where: { ownerId }, orderBy: { createdAt: "asc" } });
     return Promise.all(
       servers.map(async (server) => {
         const [latest, playersOnline] = await Promise.all([
-          prisma.telemetry.findFirst({ where: { serverId: server.id }, orderBy: { timestamp: "desc" } }),
+          prisma.telemetry.findFirst({ where: { serverId: server.id, timestamp: { gte: cutoff } }, orderBy: { timestamp: "desc" } }),
           prisma.playerSession.count({ where: { serverId: server.id, online: true } }),
         ]);
         return {
@@ -187,8 +258,15 @@ export const prismaRepo: OpsRepo = {
     return row ? mapServer(row) : null;
   },
   async createServer(ownerId, name) {
-    await ensureOwner(ownerId);
-    const row = await db().server.create({
+    const prisma = db();
+    const user = await prisma.user.findUnique({ where: { id: ownerId } });
+    if (!user) throw new RepoError("not_found");
+    const limits = planLimits(user.plan);
+    const serverCount = await prisma.server.count({ where: { ownerId } });
+    if (serverCount >= limits.maxServers) {
+      return { ok: false, code: "plan_limit", plan: limits.id, maxServers: limits.maxServers, serverCount };
+    }
+    const row = await prisma.server.create({
       data: {
         name,
         ownerId,
@@ -198,17 +276,17 @@ export const prismaRepo: OpsRepo = {
       },
     });
     const server = mapServer(row);
-    return { server, config: craftOpsJson(server.apiKey, "https://craftops.app/api/v1") };
+    return { ok: true, server, config: craftOpsJson(server.apiKey, "https://craftops.app/api/v1") };
   },
   async dashboard(serverId) {
     const prisma = db();
-    const server = await prisma.server.findUnique({ where: { id: serverId } });
-    if (!server) return null;
-    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const scoped = await cutoffFor(serverId);
+    if (!scoped) return null;
+    const { server, cutoff } = scoped;
     const [telemetry, online, recent] = await Promise.all([
-      prisma.telemetry.findMany({ where: { serverId, timestamp: { gte: since } }, orderBy: { timestamp: "asc" } }),
+      prisma.telemetry.findMany({ where: { serverId, timestamp: { gte: cutoff } }, orderBy: { timestamp: "asc" } }),
       prisma.playerSession.count({ where: { serverId, online: true } }),
-      prisma.auditLog.findMany({ where: { serverId }, orderBy: { timestamp: "desc" }, take: 6 }),
+      prisma.auditLog.findMany({ where: { serverId, timestamp: { gte: cutoff } }, orderBy: { timestamp: "desc" }, take: 6 }),
     ]);
     return buildDashboard(
       mapServer(server),
@@ -236,14 +314,17 @@ export const prismaRepo: OpsRepo = {
     return rows.map(mapPlayer);
   },
   async audit(serverId, filter: AuditFilter) {
+    const scoped = await cutoffFor(serverId);
+    const cutoff = scoped?.cutoff ?? retentionCutoff("free");
     const where: Prisma.AuditLogWhereInput = { serverId };
     if (filter.type && filter.type !== "all") where.type = filter.type;
-    if (filter.from || filter.to) {
-      const timestamp: Prisma.DateTimeFilter = {};
-      if (filter.from) timestamp.gte = new Date(filter.from);
-      if (filter.to) timestamp.lte = new Date(filter.to);
-      where.timestamp = timestamp;
+    const timestamp: Prisma.DateTimeFilter = { gte: cutoff };
+    if (filter.from) {
+      const requested = new Date(filter.from);
+      if (requested > cutoff) timestamp.gte = requested;
     }
+    if (filter.to) timestamp.lte = new Date(filter.to);
+    where.timestamp = timestamp;
     if (filter.player?.trim()) {
       where.OR = [
         { player: { contains: filter.player.trim(), mode: "insensitive" } },
@@ -255,8 +336,10 @@ export const prismaRepo: OpsRepo = {
   },
   async console(serverId) {
     const prisma = db();
+    const scoped = await cutoffFor(serverId);
+    const cutoff = scoped?.cutoff ?? retentionCutoff("free");
     const [lines, queue] = await Promise.all([
-      prisma.auditLog.findMany({ where: { serverId }, orderBy: { timestamp: "desc" }, take: 180 }),
+      prisma.auditLog.findMany({ where: { serverId, timestamp: { gte: cutoff } }, orderBy: { timestamp: "desc" }, take: 180 }),
       prisma.remoteCommand.findMany({ where: { serverId }, orderBy: { createdAt: "desc" }, take: 20 }),
     ]);
     return { lines: lines.map(mapAudit).reverse(), queue: queue.map(mapCommand) };
@@ -344,7 +427,7 @@ export const prismaRepo: OpsRepo = {
     }
   },
   async enqueue(serverId, action, args, line) {
-    if (!isKnownAction(action)) throw new Error("Neznáma akcia.");
+    if (!isKnownAction(action)) throw new RepoError("unknown_action");
     const row = await db().remoteCommand.create({
       data: { serverId, action, args, status: "pending" },
     });
@@ -383,10 +466,11 @@ export const prismaRepo: OpsRepo = {
   },
   async badge(serverId) {
     const prisma = db();
-    const server = await prisma.server.findUnique({ where: { id: serverId } });
-    if (!server) return null;
+    const scoped = await cutoffFor(serverId);
+    if (!scoped) return null;
+    const { server, cutoff } = scoped;
     const [latest, players] = await Promise.all([
-      prisma.telemetry.findFirst({ where: { serverId }, orderBy: { timestamp: "desc" } }),
+      prisma.telemetry.findFirst({ where: { serverId, timestamp: { gte: cutoff } }, orderBy: { timestamp: "desc" } }),
       prisma.playerSession.count({ where: { serverId, online: true } }),
     ]);
     return {

@@ -149,8 +149,20 @@ export type BadgeStatus = {
   updatedAt: string;
 };
 
+export type PlanId = "free" | "pro";
+
+export type UserRecord = {
+  id: string;
+  name: string;
+  email: string | null;
+  discordId: string | null;
+  passwordHash: string | null;
+  plan: PlanId;
+  image: string | null;
+};
+
 export type StoreData = {
-  users: { id: string; name: string; email: string; discordId: string | null }[];
+  users: UserRecord[];
   servers: ServerRecord[];
   telemetry: TelemetryPoint[];
   auditLogs: AuditRecord[];
@@ -161,3 +173,11 @@ export type StoreData = {
 export const DEMO_OWNER_ID = "user_demo_owner";
 export const DEMO_SERVER_ID = "srv_hory_a_doly";
 export const DEMO_API_KEY = "CO_DEMO_HORYADOLY_7F3A9C2E";
+export const DEMO_OWNER_EMAIL = "majitel@craftops.local";
+export const DEMO_OWNER_PASSWORD = "demo-hory";
+
+export const SECOND_OWNER_ID = "user_peter_dubrava";
+export const SECOND_SERVER_ID = "srv_dubravska_bana";
+export const SECOND_API_KEY = "CO_DEMO_DUBRAVA_4C81B6D0";
+export const SECOND_OWNER_EMAIL = "peter@craftops.local";
+export const SECOND_OWNER_PASSWORD = "demo-bana";

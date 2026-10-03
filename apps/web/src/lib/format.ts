@@ -16,8 +16,8 @@ export function formatUptime(seconds: number) {
   return `${minutes} min`;
 }
 
-export function formatWhen(iso: string) {
-  return new Date(iso).toLocaleString("sk-SK", {
+export function formatWhen(iso: string, locale: "sk" | "en" = "sk") {
+  return new Date(iso).toLocaleString(locale === "en" ? "en-GB" : "sk-SK", {
     day: "numeric",
     month: "numeric",
     hour: "2-digit",
@@ -25,8 +25,8 @@ export function formatWhen(iso: string) {
   });
 }
 
-export function formatClock(iso: string) {
-  return new Date(iso).toLocaleTimeString("sk-SK", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+export function formatClock(iso: string, locale: "sk" | "en" = "sk") {
+  return new Date(iso).toLocaleTimeString(locale === "en" ? "en-GB" : "sk-SK", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
 export function dimensionLabel(id: string | null | undefined) {

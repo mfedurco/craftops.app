@@ -4,8 +4,9 @@ import { randomBytes, randomUUID } from "node:crypto";
 
 import { isKnownAction } from "./commands";
 import { buildDashboard, craftOpsJson, isAuditType } from "./format";
+import { planLimits, retentionCutoff } from "./plans";
+import { RepoError, type OpsRepo } from "./repo";
 import { buildSeed } from "./seed";
-import type { OpsRepo } from "./repo";
 import type {
   AuditFilter,
   AuditRecord,
@@ -16,12 +17,13 @@ import type {
   ServerSummary,
   StoreData,
   TelemetryInput,
+  UserRecord,
 } from "./types";
 
-const STORE_VERSION = 1;
+const STORE_VERSION = 2;
 const DATA_PATH = path.join(process.cwd(), ".data", "store.json");
 
-type Memory = { data: StoreData };
+type Memory = { version: number; data: StoreData };
 const globalStore = globalThis as unknown as {
   __craftops?: Memory;
   __craftopsChain?: Promise<void>;
@@ -52,8 +54,8 @@ function write(data: StoreData) {
 }
 
 function withStore<T>(fn: (data: StoreData) => T, persist = false): Promise<T> {
-  if (!globalStore.__craftops) {
-    globalStore.__craftops = { data: load() };
+  if (!globalStore.__craftops || globalStore.__craftops.version !== STORE_VERSION) {
+    globalStore.__craftops = { version: STORE_VERSION, data: load() };
   }
   let result!: T;
   const previous = globalStore.__craftopsChain ?? Promise.resolve();
@@ -69,8 +71,9 @@ function withStore<T>(fn: (data: StoreData) => T, persist = false): Promise<T> {
 }
 
 function summary(data: StoreData, server: ServerRecord): ServerSummary {
+  const cutoff = retentionCutoff(data.users.find((user) => user.id === server.ownerId)?.plan).getTime();
   const latest = data.telemetry
-    .filter((point) => point.serverId === server.id)
+    .filter((point) => point.serverId === server.id && fresh(point.timestamp, cutoff))
     .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
     .at(-1);
   const playersOnline = server.stopped
@@ -81,6 +84,21 @@ function summary(data: StoreData, server: ServerRecord): ServerSummary {
 
 function owned(data: StoreData, ownerId: string, serverId: string) {
   return data.servers.find((server) => server.id === serverId && server.ownerId === ownerId) ?? null;
+}
+
+function ownerPlan(data: StoreData, serverId: string) {
+  const server = data.servers.find((item) => item.id === serverId);
+  const user = data.users.find((item) => item.id === server?.ownerId);
+  return user?.plan ?? "free";
+}
+
+function cutoffMs(data: StoreData, serverId: string) {
+  return retentionCutoff(ownerPlan(data, serverId)).getTime();
+}
+
+function fresh(timestamp: string, cutoff: number) {
+  const time = Date.parse(timestamp);
+  return !Number.isNaN(time) && time >= cutoff;
 }
 
 function touchPlayer(data: StoreData, serverId: string, sample: PlayerSample, online: boolean) {
@@ -192,6 +210,74 @@ function preview(data: StoreData, server: ServerRecord, action: string, args: Re
 
 export const demoRepo: OpsRepo = {
   mode: "demo",
+  findUserById(id) {
+    return withStore((data) => data.users.find((user) => user.id === id) ?? null);
+  },
+  findUserByEmail(email) {
+    const needle = email.trim().toLowerCase();
+    return withStore((data) => data.users.find((user) => user.email?.toLowerCase() === needle) ?? null);
+  },
+  registerUser({ name, email, passwordHash }) {
+    return withStore((data) => {
+      const needle = email.trim().toLowerCase();
+      if (data.users.some((user) => user.email?.toLowerCase() === needle)) {
+        throw new RepoError("email_taken");
+      }
+      const user: UserRecord = {
+        id: cid(),
+        name: name.trim(),
+        email: needle,
+        discordId: null,
+        passwordHash,
+        plan: "free",
+        image: null,
+      };
+      data.users.push(user);
+      return user;
+    }, true);
+  },
+  upsertDiscordUser({ discordId, email, name, image }) {
+    return withStore((data) => {
+      const byDiscord = data.users.find((user) => user.discordId === discordId);
+      if (byDiscord) {
+        byDiscord.name = name || byDiscord.name;
+        byDiscord.image = image;
+        if (email && !byDiscord.email) byDiscord.email = email.toLowerCase();
+        return byDiscord;
+      }
+      const needle = email?.trim().toLowerCase();
+      const byEmail = needle ? data.users.find((user) => user.email?.toLowerCase() === needle) : undefined;
+      if (byEmail) {
+        byEmail.discordId = discordId;
+        byEmail.name = byEmail.name || name;
+        byEmail.image = image ?? byEmail.image;
+        return byEmail;
+      }
+      const user: UserRecord = {
+        id: cid(),
+        name: name.trim() || "Discord",
+        email: needle || null,
+        discordId,
+        passwordHash: null,
+        plan: "free",
+        image,
+      };
+      data.users.push(user);
+      return user;
+    }, true);
+  },
+  usage(ownerId) {
+    return withStore((data) => {
+      const user = data.users.find((item) => item.id === ownerId);
+      const limits = planLimits(user?.plan);
+      return {
+        plan: limits.id,
+        serverCount: data.servers.filter((server) => server.ownerId === ownerId).length,
+        maxServers: limits.maxServers,
+        retentionDays: limits.retentionDays,
+      };
+    });
+  },
   listServers(ownerId) {
     return withStore((data) => data.servers.filter((server) => server.ownerId === ownerId).map((server) => summary(data, server)));
   },
@@ -203,6 +289,12 @@ export const demoRepo: OpsRepo = {
   },
   createServer(ownerId, name) {
     return withStore((data) => {
+      const user = data.users.find((item) => item.id === ownerId);
+      const limits = planLimits(user?.plan);
+      const serverCount = data.servers.filter((server) => server.ownerId === ownerId).length;
+      if (serverCount >= limits.maxServers) {
+        return { ok: false as const, code: "plan_limit" as const, plan: limits.id, maxServers: limits.maxServers, serverCount };
+      }
       const server: ServerRecord = {
         id: cid(),
         name,
@@ -215,17 +307,18 @@ export const demoRepo: OpsRepo = {
         createdAt: new Date().toISOString(),
       };
       data.servers.push(server);
-      return { server, config: craftOpsJson(server.apiKey) };
+      return { ok: true as const, server, config: craftOpsJson(server.apiKey) };
     }, true);
   },
   dashboard(serverId) {
     return withStore((data) => {
       const server = data.servers.find((item) => item.id === serverId);
       if (!server) return null;
-      const telemetry = data.telemetry.filter((point) => point.serverId === serverId);
+      const cutoff = cutoffMs(data, serverId);
+      const telemetry = data.telemetry.filter((point) => point.serverId === serverId && fresh(point.timestamp, cutoff));
       const online = data.players.filter((player) => player.serverId === serverId && player.online).length;
       const recent = data.auditLogs
-        .filter((entry) => entry.serverId === serverId)
+        .filter((entry) => entry.serverId === serverId && fresh(entry.timestamp, cutoff))
         .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
         .slice(0, 6);
       return buildDashboard(server, telemetry, online, recent);
@@ -239,12 +332,12 @@ export const demoRepo: OpsRepo = {
     );
   },
   audit(serverId, filter: AuditFilter) {
-    return withStore((data) => filterAudit(data.auditLogs, serverId, filter));
+    return withStore((data) => filterAudit(data.auditLogs, serverId, filter, cutoffMs(data, serverId)));
   },
   console(serverId) {
     return withStore((data) => ({
       lines: data.auditLogs
-        .filter((entry) => entry.serverId === serverId)
+        .filter((entry) => entry.serverId === serverId && fresh(entry.timestamp, cutoffMs(data, serverId)))
         .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
         .slice(-180),
       queue: data.commands
@@ -320,8 +413,8 @@ export const demoRepo: OpsRepo = {
   enqueue(serverId, action, args, line) {
     return withStore((data) => {
       const server = data.servers.find((item) => item.id === serverId);
-      if (!server) throw new Error("Server sa nenašiel.");
-      if (!isKnownAction(action)) throw new Error("Neznáma akcia.");
+      if (!server) throw new RepoError("not_found");
+      if (!isKnownAction(action)) throw new RepoError("unknown_action");
       const now = new Date().toISOString();
       const command: CommandRecord = {
         id: cid(),
@@ -368,7 +461,10 @@ export const demoRepo: OpsRepo = {
       const server = data.servers.find((item) => item.id === serverId);
       if (!server) return null;
       const view = summary(data, server);
-      const latest = data.telemetry.filter((point) => point.serverId === serverId).sort((a, b) => a.timestamp.localeCompare(b.timestamp)).at(-1);
+      const latest = data.telemetry
+        .filter((point) => point.serverId === serverId && fresh(point.timestamp, cutoffMs(data, serverId)))
+        .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+        .at(-1);
       return {
         name: server.name,
         online: !server.stopped,
@@ -382,12 +478,14 @@ export const demoRepo: OpsRepo = {
   },
 };
 
-function filterAudit(entries: AuditRecord[], serverId: string, filter: AuditFilter) {
+function filterAudit(entries: AuditRecord[], serverId: string, filter: AuditFilter, cutoff: number) {
   const player = filter.player?.trim().toLowerCase();
-  const from = filter.from ? Date.parse(filter.from) : null;
+  const requestedFrom = filter.from ? Date.parse(filter.from) : null;
+  const from = requestedFrom != null && !Number.isNaN(requestedFrom) ? Math.max(requestedFrom, cutoff) : cutoff;
   const to = filter.to ? Date.parse(filter.to) : null;
   return entries
     .filter((entry) => entry.serverId === serverId)
+    .filter((entry) => fresh(entry.timestamp, from))
     .filter((entry) => (filter.type && filter.type !== "all" ? entry.type === filter.type : true))
     .filter((entry) => (player ? (entry.player ?? "").toLowerCase().includes(player) || entry.message.toLowerCase().includes(player) : true))
     .filter((entry) => (from != null && !Number.isNaN(from) ? Date.parse(entry.timestamp) >= from : true))

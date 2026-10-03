@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 import { isKnownAction, parseConsoleLine, stringArgs } from "@/lib/commands";
-import { apiError } from "@/lib/http";
-import { getRepo } from "@/lib/repo";
+import { fail, requestLocale } from "@/lib/http";
+import { t } from "@/lib/i18n";
+import { getRepo, RepoError } from "@/lib/repo";
 import { getAppSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -24,7 +25,7 @@ export async function GET(request: NextRequest) {
   const repo = await getRepo();
   if (apiKey) {
     const server = await repo.findByApiKey(apiKey);
-    if (!server) return apiError("Neplatný API kľúč.", 401);
+    if (!server) return fail("api.badKey", 401);
     const pending = await repo.pullPending(server.id);
     return NextResponse.json({
       commands: pending.map((command) => ({
@@ -35,11 +36,11 @@ export async function GET(request: NextRequest) {
     });
   }
   const session = await getAppSession();
-  if (!session.user) return apiError("Prihláste sa cez Discord.", 401);
+  if (!session.user) return fail("api.unauthorized", 401);
   const serverId = request.nextUrl.searchParams.get("serverId");
-  if (!serverId) return apiError("Chýba server.", 400);
+  if (!serverId) return fail("api.missingServer", 400);
   const server = await repo.getOwnedServer(session.user.id, serverId);
-  if (!server) return apiError("Server sa nenašiel.", 404);
+  if (!server) return fail("api.notFound", 404);
   const feed = await repo.console(serverId);
   return NextResponse.json({ commands: feed.queue });
 }
@@ -51,9 +52,9 @@ export async function POST(request: NextRequest) {
 
   if (apiKey && json && typeof json === "object" && "ack" in json) {
     const server = await repo.findByApiKey(apiKey);
-    if (!server) return apiError("Neplatný API kľúč.", 401);
+    if (!server) return fail("api.badKey", 401);
     const parsed = ackSchema.safeParse(json);
-    if (!parsed.success) return apiError("Potvrdenie príkazu má neplatný tvar.", 400);
+    if (!parsed.success) return fail("api.badAck", 400);
     await repo.ack(server.id, parsed.data.ack);
     return NextResponse.json({ ok: true });
   }
@@ -61,13 +62,13 @@ export async function POST(request: NextRequest) {
   let serverId = typeof json?.serverId === "string" ? json.serverId : "";
   if (apiKey) {
     const server = await repo.findByApiKey(apiKey);
-    if (!server) return apiError("Neplatný API kľúč.", 401);
+    if (!server) return fail("api.badKey", 401);
     serverId = server.id;
   } else {
     const session = await getAppSession();
-    if (!session.user) return apiError("Prihláste sa cez Discord.", 401);
+    if (!session.user) return fail("api.unauthorized", 401);
     const owned = await repo.getOwnedServer(session.user.id, serverId);
-    if (!owned) return apiError("Server sa nenašiel.", 404);
+    if (!owned) return fail("api.notFound", 404);
   }
 
   let action = "";
@@ -75,7 +76,7 @@ export async function POST(request: NextRequest) {
   let line = "";
   if (typeof json?.line === "string") {
     line = json.line.trim();
-    if (!line) return apiError("Zadajte príkaz.", 400);
+    if (!line) return fail("api.emptyCommand", 400);
     const parsed = parseConsoleLine(line);
     action = parsed.action;
     args = parsed.args;
@@ -84,20 +85,22 @@ export async function POST(request: NextRequest) {
     args = stringArgs(json.args);
     line = typeof json.line === "string" ? json.line : "";
   } else {
-    return apiError("Chýba akcia alebo riadok príkazu.", 400);
+    return fail("api.badCommand", 400);
   }
-  if (!isKnownAction(action)) return apiError("Neznáma akcia.", 400);
+  if (!isKnownAction(action)) return fail("api.unknownAction", 400);
   if ((action === "kick" || action === "ban" || action === "heal" || action === "op" || action === "deop" || action === "give") && !args.player) {
-    return apiError("Chýba meno hráča.", 400);
+    return fail("api.missingPlayer", 400);
   }
   try {
     const command = await repo.enqueue(serverId, action, args, line);
     return NextResponse.json({
       ok: true,
       command,
-      message: "Príkaz je vo fronte. Mod ho stiahne pri ďalšej požiadavke na /api/v1/cmd.",
+      message: t(requestLocale(), "api.queued"),
     });
   } catch (error) {
-    return apiError(error instanceof Error ? error.message : "Príkaz sa nepodarilo zaradiť.", 400);
+    if (error instanceof RepoError && error.code === "unknown_action") return fail("api.unknownAction", 400);
+    if (error instanceof RepoError && error.code === "not_found") return fail("api.notFound", 404);
+    return fail("api.commandFailed", 400);
   }
 }
