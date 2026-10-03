@@ -1,0 +1,14 @@
+name = "craftops-widget"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+
+# Placeholder ids. There is no real Cloudflare KV in this repo.
+# Local reads use mock-kv.json via `pnpm --filter @craftops/widget dev`.
+[[routes]]
+pattern = "widget.craftops.app"
+custom_domain = true
+
+[[kv_namespaces]]
+binding = "STATUS"
+id = "00000000000000000000000000000000"
+preview_id = "00000000000000000000000000000000"

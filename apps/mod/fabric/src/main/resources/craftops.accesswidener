@@ -1,0 +1,6 @@
+accessWidener	v2	named
+
+accessible	field	net/minecraft/server/network/ServerPlayerEntity	pingMilliseconds	I
+accessible	field	net/minecraft/server/network/ServerPlayerEntity	networkHandler	Lnet/minecraft/server/network/ServerPlayNetworkHandler;
+accessible	field	net/minecraft/server/network/ServerPlayNetworkHandler	player	Lnet/minecraft/server/network/ServerPlayerEntity;
+accessible	field	net/minecraft/server/network/ServerPlayNetworkHandler	connection	Lnet/minecraft/network/ClientConnection;

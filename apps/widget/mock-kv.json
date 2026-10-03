@@ -1,0 +1,11 @@
+{
+  "srv_hory_a_doly": {
+    "name": "Hory a Doly",
+    "online": true,
+    "players": 6,
+    "max": 40,
+    "tps": 19.8,
+    "mspt": 12.4,
+    "updatedAt": "2026-10-03T21:00:00.000Z"
+  }
+}

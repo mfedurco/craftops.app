@@ -1,0 +1,70 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 28 14% 6%;
+  --foreground: 36 33% 92%;
+  --card: 28 12% 9%;
+  --card-foreground: 36 33% 92%;
+  --popover: 28 14% 8%;
+  --popover-foreground: 36 33% 92%;
+  --primary: 30 74% 58%;
+  --primary-foreground: 28 20% 8%;
+  --secondary: 28 8% 14%;
+  --secondary-foreground: 36 20% 88%;
+  --muted: 28 8% 13%;
+  --muted-foreground: 30 10% 64%;
+  --accent: 28 10% 16%;
+  --accent-foreground: 36 33% 92%;
+  --destructive: 10 68% 54%;
+  --destructive-foreground: 36 40% 97%;
+  --border: 30 8% 18%;
+  --input: 30 8% 20%;
+  --ring: 30 74% 58%;
+  --ok: 98 32% 62%;
+  --radius: 0.45rem;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  color: hsl(var(--foreground));
+  background:
+    radial-gradient(900px 420px at 0% -10%, rgba(227, 154, 75, 0.14), transparent 55%),
+    radial-gradient(700px 380px at 100% 0%, rgba(143, 191, 127, 0.06), transparent 50%),
+    hsl(var(--background));
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+}
+
+::selection {
+  background: rgba(227, 154, 75, 0.35);
+}
+
+@keyframes ops-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.ops-pulse {
+  animation: ops-pulse 1.8s ease-in-out infinite;
+}
+
+.console-line-chat { color: #e7dfd4; }
+.console-line-command { color: #e0a15a; }
+.console-line-join { color: #8fbf7f; }
+.console-line-leave { color: #8a8178; }
+.console-line-death { color: #e07a5f; }
+.console-line-action { color: #d4b483; }

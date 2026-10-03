@@ -1,0 +1,5 @@
+// Loader-specific projects live in core/ and fabric/. NeoForge is not implemented.
+subprojects {
+    group = "app.craftops"
+    version = "0.1.0"
+}

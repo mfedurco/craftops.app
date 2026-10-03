@@ -1,0 +1,5 @@
+{
+  "api_key": "CO_SERVER_UUID_TOKEN",
+  "endpoint": "https://craftops.app/api/v1",
+  "telemetry_interval_seconds": 10
+}

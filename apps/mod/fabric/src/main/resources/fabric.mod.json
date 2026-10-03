@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "craftops",
+  "version": "0.1.0",
+  "name": "CraftOps",
+  "description": "Server-side telemetry, audit events, and remote actions for CraftOps.app. Clients do not install this mod.",
+  "authors": ["CraftOps"],
+  "license": "MIT",
+  "environment": "server",
+  "entrypoints": {
+    "server": ["app.craftops.fabric.CraftOpsFabric"]
+  },
+  "mixins": ["craftops.mixins.json"],
+  "accessWidener": "craftops.accesswidener",
+  "depends": {
+    "fabricloader": ">=0.15.11",
+    "minecraft": "~1.20.1",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}
