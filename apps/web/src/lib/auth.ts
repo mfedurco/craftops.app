@@ -5,6 +5,11 @@ import DiscordProvider from "next-auth/providers/discord";
 import { verifyPassword } from "./passwords";
 
 if (!process.env.NEXTAUTH_SECRET) {
+  // Záložný kľúč je povolený len pre lokálny vývoj a demo. V produkcii za behu
+  // (nie počas `next build`) radšej zlyhať, než podpisovať sessions známym kľúčom.
+  if (process.env.NODE_ENV === "production" && process.env.NEXT_PHASE !== "phase-production-build") {
+    throw new Error("NEXTAUTH_SECRET musí byť v produkcii nastavený.");
+  }
   process.env.NEXTAUTH_SECRET = "dev-craftops-secret";
 }
 if (!process.env.NEXTAUTH_URL) {

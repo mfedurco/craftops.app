@@ -209,7 +209,7 @@ function seriesFor(serverId: string, now: number, ramBase: number) {
     const index = points.length;
     const hour = new Date(t).getUTCHours();
     const evening = hour >= 18 && hour <= 22;
-    let mspt = 11 + 3 * Math.abs(Math.sin(index / 9)) + (evening ? 1.5 : 0);
+    const mspt = 11 + 3 * Math.abs(Math.sin(index / 9)) + (evening ? 1.5 : 0);
     const tps = round1(19.4 + (index % 4) * 0.1);
     ram += evening ? 20 : 8;
     if (index % 40 === 0) ram = ramBase;
